@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1週間 原付ツーリングルートマップ</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<style>
+html,body{height:100%;margin:0;font-family:sans-serif}
+#map{height:100%}
+.legend{background:#fffe;padding:8px 10px;border-radius:6px;font-size:13px;line-height:1.6}
+.legend i{display:inline-block;width:14px;height:4px;margin-right:6px;vertical-align:middle}
+</style></head><body><div id="map"></div>
+<script>
+const map=L.map('map').setView([35.5,137.3],8);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,
+ attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);
+
+// 座標は概算(スクリーンショットの地名から推定)
+const P={
+ start:["出発・帰着地(関西・概算)",34.69,135.50],
+ iga:["伊賀・亀山",34.77,136.13],
+ kame:["亀山",34.85,136.45],
+ nagoya:["名古屋",35.18,136.91],
+ nakatsu:["中津川・木曽路",35.49,137.50],
+ sawando:["沢渡",36.19,137.65],
+ kamikochi:["上高地",36.25,137.64],
+ ogi:["扇沢駅・黒部ダム",36.47,137.66],
+ suwa:["諏訪湖・諏訪大社",36.05,138.11],
+ kofu:["甲府・昇仙峡",35.70,138.57],
+ hachi:["鉢伏山(最高標高 約1,929m)",36.09,137.97],
+ ina:["伊那",35.83,137.95],
+ koma:["駒ヶ根・光前寺",35.73,137.93],
+ iida:["飯田",35.515,137.82],
+ jibu:["治部坂峠",35.43,137.60],
+ koran:["香嵐渓",35.14,137.30],
+ tsu:["津「新玉亭」",34.73,136.51]
+};
+const days=[
+ {n:"0〜1日目: 関西→東海→木曽路→沢渡",c:"#4a90e2",r:["start","iga","kame","nagoya","nakatsu","sawando"]},
+ {n:"2〜3日目: 北アルプス・黒部・上高地",c:"#2ecc71",r:["sawando","kamikochi","ogi","kamikochi","suwa"]},
+ {n:"4〜5日目: 諏訪・甲府・鉢伏山・伊那",c:"#f1c40f",r:["suwa","kofu","suwa","hachi","ina"]},
+ {n:"6〜7日目: 奥三河・津・関西帰着",c:"#e91e8c",r:["ina","koma","iida","jibu","koran","nagoya","tsu","start"]}
+];
+const all=[];
+const G=days.map(()=>L.layerGroup().addTo(map));
+const B=days.map(()=>null);
+const st=document.createElement('div');st.style.cssText='position:absolute;top:10px;right:10px;z-index:1000;background:#fffe;padding:6px 10px;border-radius:6px;font-size:13px';
+document.body.appendChild(st);
+async function osrm(pts,ex){
+ const q=pts.map(p=>p[1]+','+p[0]).join(';');
+ const u='https://router.project-osrm.org/route/v1/driving/'+q+'?overview=full&geometries=geojson'+(ex?'&exclude=motorway':'');
+ const r=await fetch(u);const j=await r.json();
+ if(j.code!=='Ok')throw new Error(j.code);
+ return {g:j.routes[0].geometry,km:j.routes[0].distance/1000};
+}
+(async()=>{
+ let tot=0;
+ for(const [i,d] of days.entries()){
+  const pts=d.r.map(k=>[P[k][1],P[k][2]]);
+  st.textContent='ルート検索中… '+(i+1)+'/'+days.length;
+  let res=null,note='';
+  try{res=await osrm(pts,true);}catch(e){
+   try{res=await osrm(pts,false);note='(高速含む)';}catch(e2){}}
+  if(res){
+   tot+=res.km;
+   L.geoJSON(res.g,{style:{color:d.c,weight:5,opacity:.85}}).addTo(G[i])
+    .bindPopup(d.n+'<br>約'+Math.round(res.km)+' km'+note);
+  }else{
+   L.polyline(pts,{color:d.c,weight:4,dashArray:'8 6'}).addTo(G[i]).bindPopup(d.n+'(検索失敗・直線)');
+  }
+  await new Promise(r=>setTimeout(r,1100));
+ }
+ st.textContent='ルート合計 約'+Math.round(tot)+' km(OSRM算出・車用)';
+})();
+days.forEach((d,i)=>{
+ const seen=new Set();const pts=[];
+ d.r.forEach(k=>{if(seen.has(k))return;seen.add(k);const p=P[k];pts.push([p[1],p[2]]);
+  L.circleMarker([p[1],p[2]],{radius:7,color:"#333",weight:2,fillColor:d.c,fillOpacity:1})
+   .addTo(G[i]).bindTooltip(p[0]).bindPopup("<b>"+p[0]+"</b>");
+  all.push([p[1],p[2]]);});
+ B[i]=L.latLngBounds(pts);
+});
+map.fitBounds(all,{padding:[30,30]});
+
+const bar=L.control({position:'topleft'});
+bar.onAdd=()=>{const d=L.DomUtil.create('div','legend');L.DomEvent.disableClickPropagation(d);
+ d.innerHTML='<div id="btns"></div>';return d;};
+bar.addTo(map);
+const names=['全日程',...days.map(x=>x.n.split(':')[0])];
+const btns=document.getElementById('btns');
+function sel(k){ // k=0 全日程, 1..n 各日
+ days.forEach((_,i)=>{const on=k===0||k===i+1;
+  if(on&&!map.hasLayer(G[i]))G[i].addTo(map);
+  if(!on&&map.hasLayer(G[i]))map.removeLayer(G[i]);});
+ map.fitBounds(k===0?all:B[k-1],{padding:[40,40]});
+ [...btns.children].forEach((b,j)=>b.style.background=j===k?'#4a90e2':'#eee',
+ );
+ [...btns.children].forEach((b,j)=>b.style.color=j===k?'#fff':'#000');
+}
+names.forEach((n,k)=>{const b=document.createElement('button');b.textContent=n;
+ b.style.cssText='display:block;width:100%;margin:2px 0;padding:6px 8px;border:1px solid #bbb;border-radius:4px;font-size:13px;text-align:left';
+ b.onclick=()=>sel(k);btns.appendChild(b);});
+sel(0);
+const lg=L.control({position:'bottomleft'});
+lg.onAdd=()=>{const d=L.DomUtil.create('div','legend');
+ d.innerHTML="<b>原付125cc 7泊8日(約1,110km)</b><br>10/12(月)深夜〜10/19(月)<br>"+
+ days.map(x=>`<i style="background:${x.c}"></i>${x.n}`).join("<br>")+
+ "<br><small>※OSRMで高速を除外して検索(車用)。原付通行不可道路の回避は保証されません</small>";return d;};
+lg.addTo(map);
+</script></body></html>
